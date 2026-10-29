@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invoice Converter</title>
+<style>
+  :root {
+    --bg: #F4F5F6;
+    --sheet: #FFFFFF;
+    --ink: #1C1E21;
+    --muted: #6A6F76;
+    --line: #DCDFE3;
+    --grid: #EEF0F2;
+    --accent: #8A2424;         /* MLL logo maroon */
+    --accent-soft: #F7ECEC;
+    --ok: #2C7A4B;
+    --warn: #8F5A0B;
+    --warn-bg: #FFF5E2;
+    --warn-line: #F0D9A8;
+    --err: #A12A2A;
+    --on-accent: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1E1F21;
+      --sheet: #26282B;
+      --ink: #ECEDEE;
+      --muted: #9CA1A8;
+      --line: #3A3D41;
+      --grid: #2E3033;
+      --accent: #E07A7A;
+      --accent-soft: #3A2A2B;
+      --ok: #6CC495;
+      --warn: #E9B864;
+      --warn-bg: #3A3023;
+      --warn-line: #5A4A2E;
+      --err: #F08A8A;
+      --on-accent: #1E1F21;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none;
+  }
+  main { max-width: 560px; margin: 0 auto; padding: 28px 28px 24px; display: flex; flex-direction: column; gap: 20px; min-height: 100%; }
+  h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  .sub { color: var(--muted); margin: 2px 0 0; }
+
+  /* Drop sheet: a blank timesheet waiting to be filled */
+  .sheet {
+    position: relative; border-radius: 10px; background: var(--sheet);
+    border: 1.5px dashed var(--line); min-height: 230px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+    padding: 28px; cursor: pointer; transition: border-color .15s, background-color .15s;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 100% 26px, 64px 100%;
+    background-position: 0 13px, 31px 0;
+  }
+  .sheet:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .sheet.hover { border-color: var(--accent); background-color: var(--accent-soft); }
+  .sheet .inner { background: var(--sheet); padding: 14px 22px; border-radius: 8px; }
+  .sheet svg { color: var(--accent); }
+  .sheet .big { font-size: 16px; font-weight: 600; margin: 10px 0 2px; }
+  .sheet .small { color: var(--muted); }
+  .link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; background: none; border: 0; font: inherit; padding: 0; }
+  .sheet.has-file { border-style: solid; cursor: default; }
+  .filename { font-weight: 600; font-size: 15px; word-break: break-all; margin: 10px 0 4px; }
+
+  .bar { width: 220px; height: 4px; border-radius: 2px; background: var(--grid); overflow: hidden; margin: 14px auto 0; }
+  .bar span { display: block; height: 100%; width: 0; background: var(--accent); transition: width .4s; }
+
+  .row { display: flex; align-items: flex-end; gap: 12px; }
+  label { display: block; font-weight: 500; margin-bottom: 6px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  input[type=text] {
+    width: 100%; font: inherit; font-size: 15px; padding: 9px 11px; border-radius: 7px;
+    border: 1px solid var(--line); background: var(--sheet); color: var(--ink); user-select: text; -webkit-user-select: text;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field { flex: 1; }
+
+  button.primary, button.secondary {
+    font: inherit; font-weight: 600; border-radius: 7px; padding: 9px 18px; cursor: pointer; white-space: nowrap;
+  }
+  button.primary { background: var(--accent); color: var(--on-accent); border: 1px solid var(--accent); }
+  button.primary:disabled { opacity: .35; cursor: default; }
+  button.secondary { background: var(--sheet); color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+  button:focus-visible { outline: 3px solid var(--accent-soft); outline-offset: 1px; }
+
+  .error { color: var(--err); margin: 0; }
+
+  /* Results */
+  .results { display: flex; flex-direction: column; gap: 12px; }
+  .inv { background: var(--sheet); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .inv-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .inv-no { font-weight: 600; font-size: 15px; }
+  .inv-label { color: var(--muted); margin-left: 6px; }
+  .amount { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .meta { color: var(--muted); margin-top: 2px; }
+  .status { margin-top: 10px; display: flex; gap: 7px; align-items: flex-start; }
+  .status.ok { color: var(--ok); }
+  .issues { margin-top: 10px; background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn); border-radius: 7px; padding: 9px 12px; }
+  .issues p { margin: 0 0 4px; font-weight: 600; }
+  .issues ul { margin: 0; padding-left: 18px; }
+  .issues li { margin: 2px 0; }
+  .inv-actions { margin-top: 12px; display: flex; gap: 14px; }
+  .inv.failed { border-color: var(--err); }
+  .footer { display: flex; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 4px; }
+  .hidden { display: none !important; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Invoice Converter</h1>
+    <p class="sub">Turns a scanned timesheet into Excel invoices, one per page.</p>
+  </header>
+
+  <!-- Step 1: pick + convert -->
+  <section id="form">
+    <div id="sheet" class="sheet" tabindex="0" role="button" aria-label="Choose a timesheet PDF">
+      <div class="inner" id="sheet-empty">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 11v6M9.5 14.5 12 17l2.5-2.5"/></svg>
+        <div class="big">Drop the timesheet PDF here</div>
+        <div class="small">or <span class="link">choose a file</span></div>
+      </div>
+      <div class="inner hidden" id="sheet-file">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>
+        <div class="filename" id="filename"></div>
+        <button class="link" id="change">Choose a different file</button>
+      </div>
+      <div class="inner hidden" id="sheet-busy">
+        <div class="big" id="busy-text">Reading the scan…</div>
+        <div class="small">This takes about a minute per page.</div>
+        <div class="bar"><span id="bar"></span></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:20px">
+      <div class="field">
+        <label for="invno">Invoice number</label>
+        <input id="invno" type="text" placeholder="e.g. UN-B-84" spellcheck="false" autocomplete="off">
+      </div>
+      <button class="primary" id="convert" disabled>Convert</button>
+    </div>
+    <div class="hint">If the PDF has more pages, their invoice numbers count up from this one.</div>
+    <p class="error hidden" id="error" role="alert" style="margin-top:14px"></p>
+  </section>
+
+  <!-- Step 2: results -->
+  <section id="done" class="hidden">
+    <p class="sub" id="done-summary" style="margin:0 0 12px"></p>
+    <div class="results" id="results"></div>
+  </section>
+  <div class="footer hidden" id="done-footer">
+    <button class="secondary" id="reveal">Show in Finder</button>
+    <button class="primary" id="again">Convert another</button>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let pdfPath = null, busy = false, lastFolderFile = null;
+
+function api() { return window.pywebview && window.pywebview.api; }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function showError(msg) { $('error').textContent = msg; $('error').classList.toggle('hidden', !msg); }
+function setSheet(state) {
+  ['empty','file','busy'].forEach(s => $('sheet-' + s).classList.toggle('hidden', s !== state));
+  $('sheet').classList.toggle('has-file', state !== 'empty');
+}
+function refreshButton() { $('convert').disabled = busy || !pdfPath || !$('invno').value.trim(); }
+
+window.onFileDropped = path => {
+  if (busy) return;
+  pdfPath = path; showError('');
+  $('filename').textContent = path.split('/').pop();
+  setSheet('file'); refreshButton(); $('invno').focus();
+};
+window.onWrongFile = () => showError("That isn't a PDF. Drop the scanned timesheet PDF.");
+window.onProgress = (p, n) => {
+  $('busy-text').textContent = n > 1 ? `Reading page ${p} of ${n}…` : 'Reading the scan…';
+  $('bar').style.width = Math.round(((p - 0.5) / n) * 100) + '%';
+};
+
+async function pick() {
+  if (busy || !api()) return;
+  const p = await api().choose_pdf();
+  if (p) window.onFileDropped(p);
+}
+
+$('sheet').addEventListener('click', e => { if (!pdfPath || e.target.id === 'change') pick(); });
+$('sheet').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+$('invno').addEventListener('input', refreshButton);
+$('invno').addEventListener('keydown', e => { if (e.key === 'Enter' && !$('convert').disabled) convert(); });
+$('convert').addEventListener('click', convert);
+
+// Highlight while dragging (the drop itself is handled natively to get the file path)
+let depth = 0;
+document.addEventListener('dragenter', e => { e.preventDefault(); if (!busy) { depth++; $('sheet').classList.add('hover'); } });
+document.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) $('sheet').classList.remove('hover'); });
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => { e.preventDefault(); depth = 0; $('sheet').classList.remove('hover'); });
+
+async function convert() {
+  if (!pdfPath || busy) return;
+  showError(''); busy = true; refreshButton();
+  setSheet('busy'); window.onProgress(1, 1); $('bar').style.width = '8%';
+  let res;
+  try { res = await api().convert(pdfPath, $('invno').value); }
+  catch (e) { res = { error: 'Something went wrong: ' + e }; }
+  busy = false;
+  if (res.cancelled) { setSheet('file'); refreshButton(); return; }
+  if (res.error) { setSheet('file'); refreshButton(); showError(res.error); return; }
+  if (res.next_invoice_no) $('invno').value = res.next_invoice_no;
+  showResults(res);
+}
+
+function showResults(res) {
+  const ok = res.results.filter(r => !r.error);
+  const folder = res.folder.split('/').pop() || res.folder;
+  const n = ok.length;
+  $('done-summary').textContent = n
+    ? `${n} invoice${n > 1 ? 's' : ''} saved to ${folder}. Review them in Excel before sending.`
+    : `No invoices were made from this PDF.`;
+  lastFolderFile = ok.length ? ok[0].path : null;
+  $('reveal').classList.toggle('hidden', !lastFolderFile);
+  $('results').innerHTML = res.results.map(r => r.error ? `
+    <article class="inv failed">
+      <div class="inv-no">${esc(r.label)}</div>
+      <p class="error" style="margin-top:6px">This page couldn't be converted: ${esc(r.error)}</p>
+    </article>` : `
+    <article class="inv">
+      <div class="inv-head">
+        <div><span class="inv-no">${esc(r.invoice_no)}</span><span class="inv-label">${esc(r.label)}</span></div>
+        <div class="amount">${esc(r.total)}</div>
+      </div>
+      <div class="meta">${r.employees} employees, week of ${esc(r.week)}</div>
+      ${r.total_ok && !r.issues.length ? `
+        <div class="status ok"><span aria-hidden="true">✓</span><span>Every row adds up and the total matches the PDF${r.pdf_total && r.pdf_total !== r.total ? ` (${esc(r.pdf_total)}, rounding)` : ''}.</span></div>` : ''}
+      ${r.total_ok && r.issues.length ? `<div class="status ok"><span aria-hidden="true">✓</span><span>Total matches the PDF.</span></div>` : ''}
+      ${r.issues.length ? `
+        <div class="issues"><p>Check ${r.issues.length === 1 ? 'this' : 'these ' + r.issues.length} in Excel</p>
+          <ul>${r.issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>` : ''}
+      <div class="inv-actions"><button class="link" data-open="${esc(r.path)}">Open ${esc(r.filename)}</button></div>
+    </article>`).join('');
+  $('results').querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => api().open_file(b.dataset.open)));
+  $('form').classList.add('hidden'); $('done').classList.remove('hidden'); $('done-footer').classList.remove('hidden');
+}
+
+$('reveal').addEventListener('click', () => lastFolderFile && api().reveal(lastFolderFile));
+$('again').addEventListener('click', () => {
+  pdfPath = null; setSheet('empty'); showError('');
+  $('done').classList.add('hidden'); $('done-footer').classList.add('hidden'); $('form').classList.remove('hidden');
+  refreshButton();
+});
+
+async function init() {
+  const s = await api().get_state();
+  if (s.next_invoice_no && !$('invno').value) $('invno').value = s.next_invoice_no;
+  if (s.platform === 'windows') $('reveal').textContent = 'Show in folder';
+  if (!s.tesseract_ok) showError(s.platform === 'windows'
+    ? "The text reader (Tesseract) is missing from this copy of the app. Download the app again."
+    : "Tesseract isn't installed on this Mac. Open Terminal, run 'brew install tesseract', then reopen this app.");
+  refreshButton();
+}
+window.addEventListener('pywebviewready', init);
+
+/* Preview mode for design review in a normal browser: ui.html?demo=file|busy|results */
+const demo = new URLSearchParams(location.search).get('demo');
+if (demo && !window.pywebview) {
+  window.pywebview = { api: { open_file(){}, reveal(){}, choose_pdf: async () => null } };
+  $('invno').value = 'UN-B-84';
+  if (demo !== 'empty') window.onFileDropped('/Users/wbot/Desktop/Document (8).pdf');
+  if (demo === 'busy') { busy = true; setSheet('busy'); window.onProgress(2, 2); refreshButton(); }
+  if (demo === 'results') showResults({ folder: '/Users/wbot/Desktop', results: [
+    { page: 1, label: 'Top', invoice_no: 'UN-B-84', employees: 39, week: 'Aug 2–8, 2026', total: '$31,724.53', pdf_total: '$31,724.54', total_ok: true, issues: [], path: '/x/a.xlsx', filename: 'MLL_UNWRAPPED_INVOICE_UN-B-84.xlsx' },
+    { page: 2, label: '1st shift', invoice_no: 'UN-B-85', employees: 47, week: 'Aug 2–8, 2026', total: '$45,771.43', pdf_total: '$45,771.42', total_ok: true, issues: ['Row 9 (Khiev Chanthou): Bill rate unclear on scan (read 45.99), used 15.00 like the rest of the page'], path: '/x/b.xlsx', filename: 'MLL_UNWRAPPED_INVOICE_UN-B-85.xlsx' } ] });
+}
+</script>
+</body>
+</html>

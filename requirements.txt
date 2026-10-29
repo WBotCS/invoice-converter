@@ -1,0 +1,14 @@
+# Pinned to versions tested together. Newer releases (NumPy 2.5, PyMuPDF 2.0) break
+# the app packaging, and OpenCV must be 4.11+ (its bundled OpenSSL must be 3.3 or newer,
+# or the app crashes on start). Don't change these without testing a build.
+numpy==2.1.3; python_version >= "3.10"
+numpy==2.0.2; python_version < "3.10"
+opencv-python-headless==4.12.0.88
+pymupdf==1.24.14
+pytesseract==0.3.13
+pywebview==5.3.2
+pyobjc-core==11.1; sys_platform == "darwin"
+pyobjc-framework-Cocoa==11.1; sys_platform == "darwin"
+pyobjc-framework-Quartz==11.1; sys_platform == "darwin"
+pyobjc-framework-WebKit==11.1; sys_platform == "darwin"
+pyobjc-framework-Security==11.1; sys_platform == "darwin"

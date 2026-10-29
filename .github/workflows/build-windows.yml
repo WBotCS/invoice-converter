@@ -1,0 +1,63 @@
+name: Build Windows app
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Tesseract (gets bundled inside the app)
+        run: choco install tesseract -y --no-progress
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt "pyinstaller==6.11.1" "pyinstaller-hooks-contrib==2024.10"
+          pip list
+
+      - name: Build the app
+        shell: pwsh
+        run: |
+          $tess = "C:\Program Files\Tesseract-OCR"
+          if (!(Test-Path "$tess\tesseract.exe")) { throw "Tesseract not found at $tess" }
+          pyinstaller --noconfirm --windowed --name "Invoice Converter" `
+            --add-data "ui.html;." --add-data "template.xlsx;." `
+            --add-data "$tess;tesseract" `
+            --collect-all webview --collect-all pymupdf `
+            --hidden-import webview.platforms.winforms `
+            app.py
+
+      - name: Self-test (all libraries load, Tesseract found)
+        shell: pwsh
+        run: |
+          $exe = "dist\Invoice Converter\Invoice Converter.exe"
+          $p = Start-Process -FilePath $exe -ArgumentList "--selftest", "--report=selftest.txt" -Wait -PassThru
+          if (Test-Path selftest.txt) { Get-Content selftest.txt }
+          if ($p.ExitCode -ne 0) { throw "Self-test failed (exit $($p.ExitCode))" }
+
+      - name: Test conversions with the built app
+        shell: pwsh
+        run: |
+          $exe = "dist\Invoice Converter\Invoice Converter.exe"
+          foreach ($f in Get-ChildItem tests\*.pdf) {
+            Add-Content results.txt "=== $($f.Name)"
+            $p = Start-Process -FilePath $exe -ArgumentList "--convert", $f.FullName, "tests\out\$($f.BaseName)", "TEST-1", "--report=results.txt" -Wait -PassThru
+            if ($p.ExitCode -ne 0) { Get-Content results.txt; throw "Conversion of $($f.Name) crashed" }
+          }
+          python tests\check_results.py results.txt
+
+      - name: Upload the app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Invoice-Converter-Windows
+          path: dist/Invoice Converter
+          retention-days: 90
