@@ -9,9 +9,9 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -41,7 +41,7 @@ jobs:
         run: |
           $exe = "dist\Invoice Converter\Invoice Converter.exe"
           $p = Start-Process -FilePath $exe -ArgumentList "--selftest", "--report=selftest.txt" -Wait -PassThru
-          if (Test-Path selftest.txt) { Get-Content selftest.txt }
+          if (Test-Path selftest.txt) { Get-Content selftest.txt | ForEach-Object { if ($_ -match "SELFTEST") { Write-Output "::notice title=Self-test::$_" } else { Write-Output $_ } } }
           if ($p.ExitCode -ne 0) { throw "Self-test failed (exit $($p.ExitCode))" }
 
       - name: Test conversions with the built app
@@ -53,10 +53,13 @@ jobs:
             $p = Start-Process -FilePath $exe -ArgumentList "--convert", $f.FullName, "tests\out\$($f.BaseName)", "TEST-1", "--report=results.txt" -Wait -PassThru
             if ($p.ExitCode -ne 0) { Get-Content results.txt; throw "Conversion of $($f.Name) crashed" }
           }
-          python tests\check_results.py results.txt
+          python tests\check_results.py results.txt | Tee-Object -Variable out
+          $code = $LASTEXITCODE
+          $out | Where-Object { $_ -match "^(PASS|FAIL)" } | ForEach-Object { Write-Output "::notice title=Test conversion::$_" }
+          if ($code -ne 0) { throw "Test conversions failed" }
 
       - name: Upload the app
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Invoice-Converter-Windows
           path: dist/Invoice Converter
