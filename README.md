@@ -10,8 +10,13 @@ sticker paper). Works on Mac and Windows.
 Some employees get part of their pay as a check. Before saving, the app shows
 everyone on the check list who is on this timesheet, with their total and check
 amount, so the amounts can be confirmed or changed (or someone added/removed).
-Their label then reads `Total Pay = 335 + 300`: the cash part (total rounded to
-the dollar, minus the check) in bold, then the check. The confirmed list is saved
+Their label then reads `Total Pay = 335 + 300`: the cash part (total minus the
+check) in bold, then the check.
+
+All dollar amounts on the labels are whole dollars with regular rounding (50 cents
+or more rounds up: 610.52 -> 611, 166.31 -> 166). Total Pay is the timesheet's real
+total rounded, so the rounded lines can occasionally add up to $1 more or less.
+Hours are shown as on the timesheet. The confirmed list is saved
 in `checks.json` (Mac: `~/Library/Application Support/Invoice Converter`,
 Windows: `%APPDATA%\Invoice Converter`) and starts from the UW entries of the
 payroll workbook's ChecksTable.
