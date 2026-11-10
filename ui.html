@@ -112,6 +112,29 @@
   .inv-actions { margin-top: 12px; display: flex; gap: 14px; }
   .inv.failed { border-color: var(--err); }
   .footer { display: flex; justify-content: space-between; gap: 12px; margin-top: auto; padding-top: 4px; }
+
+  /* Check amounts pop-up */
+  .overlay { position: fixed; inset: 0; background: rgba(20,20,22,.45); display: flex; align-items: center; justify-content: center; padding: 18px; z-index: 10; }
+  .dialog { background: var(--sheet); border-radius: 12px; width: 100%; max-width: 520px; max-height: 100%; display: flex; flex-direction: column; box-shadow: 0 18px 50px rgba(0,0,0,.3); }
+  .dialog header { padding: 18px 20px 8px; }
+  .dialog h2 { font-size: 17px; margin: 0; font-weight: 600; }
+  .dialog .body { overflow-y: auto; padding: 4px 20px 8px; }
+  .dialog footer { display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px 16px; border-top: 1px solid var(--line); }
+  table.checks { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  table.checks th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 6px; border-bottom: 1px solid var(--line); }
+  table.checks td { padding: 6px; border-bottom: 1px solid var(--grid); vertical-align: middle; }
+  table.checks td.num, table.checks th.num { text-align: right; }
+  table.checks input { width: 78px; font: inherit; padding: 5px 7px; border-radius: 6px; border: 1px solid var(--line); background: var(--sheet); color: var(--ink); text-align: right; user-select: text; -webkit-user-select: text; }
+  table.checks input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  table.checks tr.bad input { border-color: var(--err); }
+  .preview { white-space: nowrap; }
+  .preview b { font-weight: 700; }
+  .rm { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 5px; }
+  .rm:hover { color: var(--err); background: var(--grid); }
+  .addrow { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
+  select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--sheet); color: var(--ink); max-width: 100%; }
+  .note { color: var(--muted); font-size: 12.5px; margin: 10px 0 0; }
+  .rowerr { color: var(--err); font-size: 12px; }
   .hidden { display: none !important; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -120,7 +143,7 @@
 <main>
   <header>
     <h1>Invoice Converter</h1>
-    <p class="sub">Turns a scanned timesheet into Excel invoices, one per page.</p>
+    <p class="sub">Turns a scanned timesheet into Excel invoices and the label sheet.</p>
   </header>
 
   <!-- Step 1: pick + convert -->
@@ -164,6 +187,28 @@
     <button class="primary" id="again">Convert another</button>
   </div>
 </main>
+
+<div class="overlay hidden" id="checks" role="dialog" aria-modal="true" aria-labelledby="checks-title">
+  <div class="dialog">
+    <header>
+      <h2 id="checks-title">Confirm check amounts</h2>
+      <p class="sub" style="margin-top:4px">These employees get part of their pay as a check. Their label shows the cash part in bold, then the check.</p>
+    </header>
+    <div class="body">
+      <table class="checks">
+        <thead><tr><th>Employee</th><th class="num">Total</th><th class="num">Check</th><th>Label shows</th><th></th></tr></thead>
+        <tbody id="checks-rows"></tbody>
+      </table>
+      <div class="addrow"><select id="checks-add" aria-label="Add a check for another employee"></select></div>
+      <p class="note" id="checks-missing"></p>
+      <p class="note">Amounts you confirm are remembered for next time. Set a check to 0 to skip it this week; × takes the person off the check list.</p>
+    </div>
+    <footer>
+      <button class="secondary" id="checks-cancel">Cancel</button>
+      <button class="primary" id="checks-ok">Save invoice and labels</button>
+    </footer>
+  </div>
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -220,9 +265,94 @@ async function convert() {
   busy = false;
   if (res.cancelled) { setSheet('file'); refreshButton(); return; }
   if (res.error) { setSheet('file'); refreshButton(); showError(res.error); return; }
+  if (res.checks) { showChecks(res.checks); return; }
+  finished(res);
+}
+
+function finished(res) {
+  if (res.error) { setSheet('file'); refreshButton(); showError(res.error); return; }
   if (res.next_invoice_no) $('invno').value = res.next_invoice_no;
   showResults(res);
 }
+
+/* ---- check amounts pop-up ---- */
+let checkRows = [], checkOthers = [];
+function money(n) { if (typeof n !== 'number') return String(n); return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''); }
+function showChecks(c) {
+  checkRows = c.rows.map(r => ({ ...r, remove: false }));
+  checkOthers = c.others.slice();
+  $('checks-missing').textContent = c.missing.length
+    ? 'On the check list but not found on this timesheet: ' + c.missing.join(', ') + '. If someone is here under a different spelling, add them below.'
+    : '';
+  renderChecks();
+  $('checks').classList.remove('hidden');
+  const first = $('checks-rows').querySelector('input'); if (first) first.focus();
+}
+function renderChecks() {
+  $('checks-rows').innerHTML = checkRows.map((r, i) => r.remove ? '' : `
+    <tr data-i="${i}">
+      <td>${esc(r.name)}</td>
+      <td class="num">${r.total.toLocaleString()}</td>
+      <td class="num"><input type="text" inputmode="decimal" value="${esc(money(r.amount))}" aria-label="Check amount for ${esc(r.name)}"></td>
+      <td class="preview"></td>
+      <td><button class="rm" title="Take off the check list" aria-label="Remove ${esc(r.name)} from the check list">×</button></td>
+    </tr>`).join('');
+  $('checks-rows').querySelectorAll('tr').forEach(tr => {
+    const i = +tr.dataset.i, inp = tr.querySelector('input');
+    inp.addEventListener('input', () => { checkRows[i].amount = inp.value; updateRow(tr, i); });
+    tr.querySelector('.rm').addEventListener('click', () => {
+      const r = checkRows[i];
+      if (r.entry === null) { checkRows.splice(i, 1); checkOthers.push({ name: r.name, total: r.total }); }
+      else r.remove = true;
+      renderChecks();
+    });
+    updateRow(tr, i);
+  });
+  checkOthers.sort((a, b) => a.name.localeCompare(b.name));
+  $('checks-add').innerHTML = '<option value="">+ Add a check for someone else…</option>' +
+    checkOthers.map((o, k) => `<option value="${k}">${esc(o.name)} (${o.total.toLocaleString()})</option>`).join('');
+  validate();
+}
+function parseAmt(v) { const s = String(v).replace(/[$,\s]/g, ''); return s === '' ? 0 : (/^\d+(\.\d{1,2})?$/.test(s) ? +s : NaN); }
+function updateRow(tr, i) {
+  const r = checkRows[i], a = parseAmt(r.amount), cell = tr.querySelector('.preview');
+  const bad = isNaN(a) || a > r.total;
+  tr.classList.toggle('bad', bad);
+  cell.innerHTML = isNaN(a) ? '<span class="rowerr">Not a number</span>'
+    : a > r.total ? '<span class="rowerr">More than the total</span>'
+    : a ? `<b>${money(+(r.total - a).toFixed(2))}</b> + ${money(a)}` : `<b>${r.total}</b>`;
+  validate();
+}
+function validate() {
+  const bad = checkRows.some(r => !r.remove && (isNaN(parseAmt(r.amount)) || parseAmt(r.amount) > r.total));
+  $('checks-ok').disabled = bad;
+}
+$('checks-add').addEventListener('change', e => {
+  if (e.target.value === '') return;
+  const o = checkOthers.splice(+e.target.value, 1)[0];
+  checkRows.push({ name: o.name, total: o.total, amount: '', entry: null, remove: false });
+  renderChecks();
+  const ins = $('checks-rows').querySelectorAll('input'); ins[ins.length - 1].focus();
+});
+$('checks-cancel').addEventListener('click', async () => {
+  $('checks').classList.add('hidden');
+  await api().cancel_pending();
+  setSheet('file'); refreshButton();
+});
+$('checks-ok').addEventListener('click', async () => {
+  const rows = checkRows.map(r => ({ name: r.name, amount: r.remove ? 0 : parseAmt(r.amount), entry: r.entry, remove: r.remove }));
+  $('checks').classList.add('hidden');
+  busy = true; refreshButton(); $('busy-text').textContent = 'Saving…'; $('bar').style.width = '95%';
+  let res;
+  try { res = await api().finish(rows); } catch (e) { res = { error: 'Something went wrong: ' + e }; }
+  busy = false;
+  finished(res);
+});
+document.addEventListener('keydown', e => {
+  if ($('checks').classList.contains('hidden')) return;
+  if (e.key === 'Escape') $('checks-cancel').click();
+  if (e.key === 'Enter' && e.target.tagName === 'INPUT' && !$('checks-ok').disabled) $('checks-ok').click();
+});
 
 function showResults(res) {
   const ok = res.results.filter(r => !r.error);
@@ -231,6 +361,7 @@ function showResults(res) {
   $('done-summary').textContent = n
     ? `${n} invoice${n > 1 ? 's' : ''} saved to ${folder}. Review them in Excel before sending.`
     : `No invoices were made from this PDF.`;
+  if (n && res.labels) $('done-summary').textContent = `${n} invoice${n > 1 ? 's' : ''} and the label sheet saved to ${folder}. Review them before sending or printing.`;
   lastFolderFile = ok.length ? ok[0].path : null;
   $('reveal').classList.toggle('hidden', !lastFolderFile);
   $('results').innerHTML = res.results.map(r => r.error ? `
@@ -252,6 +383,12 @@ function showResults(res) {
           <ul>${r.issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul></div>` : ''}
       <div class="inv-actions"><button class="link" data-open="${esc(r.path)}">Open ${esc(r.filename)}</button></div>
     </article>`).join('');
+  if (res.labels) $('results').insertAdjacentHTML('beforeend', `
+    <article class="inv">
+      <div class="inv-head"><div><span class="inv-no">Labels</span><span class="inv-label">${res.labels.count} employees</span></div></div>
+      <div class="meta">${res.labels.checks ? res.labels.checks + ' with a check (cash in bold + check)' : 'No checks this week'}</div>
+      <div class="inv-actions"><button class="link" data-open="${esc(res.labels.path)}">Open ${esc(res.labels.filename)}</button></div>
+    </article>`);
   $('results').querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', () => api().open_file(b.dataset.open)));
   $('form').classList.add('hidden'); $('done').classList.remove('hidden'); $('done-footer').classList.remove('hidden');
 }
@@ -280,6 +417,11 @@ if (demo && !window.pywebview) {
   window.pywebview = { api: { open_file(){}, reveal(){}, choose_pdf: async () => null } };
   $('invno').value = 'UN-B-84';
   if (demo !== 'empty') window.onFileDropped('/Users/wbot/Desktop/Document (8).pdf');
+  if (demo === 'checks') { busy = true; setSheet('busy'); window.onProgress(2, 2); showChecks({ rows: [
+    { name: 'Buth Savun An', total: 635, amount: 300, entry: 10 }, { name: 'Caraballo Ana', total: 1300, amount: 300, entry: 0 },
+    { name: 'Chheng Yon', total: 866, amount: 240, entry: 12 }, { name: 'Leng Sreylen', total: 1100, amount: 450, entry: 5 },
+    { name: 'Lam KimAnh', total: 800, amount: 240, entry: 2 } ], missing: ['Ravy Suon'],
+    others: [{ name: 'Bunya Mansfield', total: 725 }, { name: 'Chan Ly', total: 1501 }] }); }
   if (demo === 'busy') { busy = true; setSheet('busy'); window.onProgress(2, 2); refreshButton(); }
   if (demo === 'results') showResults({ folder: '/Users/wbot/Desktop', results: [
     { page: 1, label: 'Top', invoice_no: 'UN-B-84', employees: 39, week: 'Aug 2–8, 2026', total: '$31,724.53', pdf_total: '$31,724.54', total_ok: true, issues: [], path: '/x/a.xlsx', filename: 'MLL_UNWRAPPED_INVOICE_UN-B-84.xlsx' },

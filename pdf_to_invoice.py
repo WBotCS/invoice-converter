@@ -942,15 +942,9 @@ def combine(pages_data):
     }
 
 
-def convert_pdf(pdf, template, invoice_no, out_dir, invoice_date=None, week_ending=None,
-                pages=None, prefix="MLL_UNWRAPPED_INVOICE", check_names=False,
-                progress=None, overwrite=True):
-    """Convert a timesheet PDF into invoice workbooks: one per timesheet. Usually
-    that's one per page; a timesheet that runs over several pages (no TOTALS row
-    until its last page) becomes a single invoice. Returns a list of result dicts.
-    A page that can't be read gets an 'error' entry instead of stopping the rest."""
-    invoice_date = invoice_date or dt.date.today()
-    os.makedirs(out_dir, exist_ok=True)
+def read_pdf(pdf, template, pages=None, progress=None):
+    """Step 1: OCR the PDF. Returns one entry per timesheet: {'page', 'nums',
+    'data'} or {'page', 'nums', 'error'} for a page that couldn't be read."""
     with zipfile.ZipFile(template) as zf:
         names = read_employee_list(zf)
     total_pages = len(pymupdf.open(pdf))
@@ -966,16 +960,36 @@ def convert_pdf(pdf, template, invoice_no, out_dir, invoice_date=None, week_endi
         except Exception as e:
             extracted.append((pno, e))
 
-    results = []
-    k = 0
+    groups = []
     for group in group_pages(extracted):
         nums = [pno for pno, _ in group]
-        page_ref = str(nums[0]) if len(nums) == 1 else f"{nums[0]}-{nums[-1]}"
+        g = {"page": str(nums[0]) if len(nums) == 1 else f"{nums[0]}-{nums[-1]}", "nums": nums}
+        if isinstance(group[0][1], Exception):
+            g["error"] = group[0][1]
+        else:
+            try:
+                g["data"] = combine([d for _, d in group])
+            except Exception as e:
+                g["error"] = e
+        groups.append(g)
+    return groups
+
+
+def write_invoices(groups, template, invoice_no, out_dir, invoice_date=None, week_ending=None,
+                   prefix="MLL_UNWRAPPED_INVOICE", check_names=False, overwrite=True):
+    """Step 2: write one invoice workbook per timesheet read by read_pdf().
+    Returns a list of result dicts (an 'error' entry for a timesheet that failed)."""
+    invoice_date = invoice_date or dt.date.today()
+    os.makedirs(out_dir, exist_ok=True)
+    results = []
+    k = 0
+    for g in groups:
+        nums, page_ref = g["nums"], g["page"]
         res = {"page": page_ref}
         try:
-            if isinstance(group[0][1], Exception):
-                raise group[0][1]
-            data = combine([d for _, d in group])
+            if "error" in g:
+                raise g["error"]
+            data = g["data"]
             week_end = week_ending or data["week_end"]
             if week_end is None:
                 raise RuntimeError("Could not read the 'Week Ending' date on this page.")
@@ -1008,6 +1022,18 @@ def convert_pdf(pdf, template, invoice_no, out_dir, invoice_date=None, week_endi
             res.update(label=f"Page {page_ref}", error=str(e))
         results.append(res)
     return results
+
+
+def convert_pdf(pdf, template, invoice_no, out_dir, invoice_date=None, week_ending=None,
+                pages=None, prefix="MLL_UNWRAPPED_INVOICE", check_names=False,
+                progress=None, overwrite=True):
+    """Convert a timesheet PDF into invoice workbooks: one per timesheet. Usually
+    that's one per page; a timesheet that runs over several pages (no TOTALS row
+    until its last page) becomes a single invoice."""
+    groups = read_pdf(pdf, template, pages=pages, progress=progress)
+    return write_invoices(groups, template, invoice_no, out_dir, invoice_date=invoice_date,
+                          week_ending=week_ending, prefix=prefix, check_names=check_names,
+                          overwrite=overwrite)
 
 
 def default_template():

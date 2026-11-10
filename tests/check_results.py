@@ -19,4 +19,12 @@ for pdf, exp in EXPECTED.items():
             print(f"FAIL {pdf}: got {emp} employees ${tot} (total_ok={tok}), expected {e_emp} / ${e_tot}"); ok = False
         else:
             print(f"PASS {pdf}: {emp} employees, ${tot}, matches the PDF")
+LABELS = {"combined.pdf": (91, 13)}  # PDF -> (labels, labels with a check)
+for pdf, (n, k) in LABELS.items():
+    block = text.split(f"=== {pdf}")[1].split("===")[0] if f"=== {pdf}" in text else ""
+    m = re.search(r"LABELS people=(\d+) checks=(\d+)", block)
+    if not m or (int(m[1]), int(m[2])) != (n, k):
+        print(f"FAIL {pdf} labels: expected {n} labels / {k} checks, got {m.group(0) if m else 'nothing'}"); ok = False
+    else:
+        print(f"PASS {pdf} labels: {n} labels, {k} with a check")
 sys.exit(0 if ok else 1)

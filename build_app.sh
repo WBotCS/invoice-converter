@@ -18,6 +18,7 @@ pyinstaller --noconfirm --windowed --name "Invoice Converter" \
   --osx-bundle-identifier com.mllservices.invoiceconverter \
   --add-data "ui.html:." \
   --add-data "template.xlsx:." \
+  --add-data "labels_template.docx:." \
   --collect-all webview \
   --collect-all pymupdf \
   --hidden-import webview.platforms.cocoa \

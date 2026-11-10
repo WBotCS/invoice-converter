@@ -30,7 +30,7 @@ jobs:
           $tess = "C:\Program Files\Tesseract-OCR"
           if (!(Test-Path "$tess\tesseract.exe")) { throw "Tesseract not found at $tess" }
           pyinstaller --noconfirm --windowed --name "Invoice Converter" `
-            --add-data "ui.html;." --add-data "template.xlsx;." `
+            --add-data "ui.html;." --add-data "template.xlsx;." --add-data "labels_template.docx;." `
             --add-data "$tess;tesseract" `
             --collect-all webview --collect-all pymupdf `
             --hidden-import webview.platforms.winforms `

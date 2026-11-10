@@ -51,8 +51,9 @@ if "--selftest" in sys.argv:
         if IS_WIN:
             import webview.platforms.winforms  # noqa: F401
         import pdf_to_invoice  # noqa: F401
+        import labels  # noqa: F401
         res = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        for f in ("ui.html", "template.xlsx"):
+        for f in ("ui.html", "template.xlsx", "labels_template.docx"):
             if not os.path.exists(os.path.join(res, f)):
                 raise FileNotFoundError(f"{f} missing from the app")
         tess = pdf_to_invoice.find_tesseract()
@@ -80,7 +81,14 @@ if "--convert" in sys.argv:
         pdf, out_dir, inv = sys.argv[i + 1:i + 4]
         pytesseract.pytesseract.tesseract_cmd = _conv.find_tesseract()
         res = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        results = _conv.convert_pdf(pdf, os.path.join(res, "template.xlsx"), inv, out_dir)
+        import labels as _lab
+        groups = _conv.read_pdf(pdf, os.path.join(res, "template.xlsx"))
+        results = _conv.write_invoices(groups, os.path.join(res, "template.xlsx"), inv, out_dir)
+        people = _lab.label_people(groups)
+        matches, _ = _lab.match_checks(people, _lab.DEFAULT_CHECKS)
+        _lab.build_labels(os.path.join(res, "labels_template.docx"), os.path.join(out_dir, "labels.docx"),
+                          people, {m["name"]: m["amount"] for m in matches})
+        _out(f"LABELS people={len(people)} checks={len(matches)}")
         for r in results:
             if "error" in r:
                 _out(f"RESULT page={r['page']} ERROR {r['error']}")
@@ -119,9 +127,11 @@ from webview.dom import DOMEventHandler
 
 import pytesseract
 import pdf_to_invoice as conv
+import labels as lab
 
 RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 SETTINGS = os.path.join(SUPPORT_DIR, "settings.json")
+CHECKS = os.path.join(SUPPORT_DIR, "checks.json")
 
 
 def _desktop():
@@ -158,10 +168,38 @@ def template_path():
     return custom if os.path.exists(custom) else os.path.join(RES_DIR, "template.xlsx")
 
 
+def labels_template_path():
+    custom = os.path.join(SUPPORT_DIR, "labels_template.docx")
+    return custom if os.path.exists(custom) else os.path.join(RES_DIR, "labels_template.docx")
+
+
+def load_checks():
+    """The check list (who gets part of their pay as a check, and how much).
+    Starts from the built-in list and remembers every confirmed change."""
+    try:
+        with open(CHECKS, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return [dict(e) for e in lab.DEFAULT_CHECKS]
+
+
+def save_checks(data):
+    try:
+        os.makedirs(SUPPORT_DIR, exist_ok=True)
+        with open(CHECKS, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        traceback.print_exc()
+
+
 class Api:
     def __init__(self):
         self._window = None
         self._busy = False
+        self._pending = None  # PDF read, waiting for check amounts to be confirmed
 
     # ---- state -----------------------------------------------------------
     def get_state(self):
@@ -208,15 +246,62 @@ class Api:
         try:
             def progress(p, n):
                 self._window.evaluate_js(f"window.onProgress({p}, {n})")
-            results = conv.convert_pdf(pdf_path, template_path(), invoice_no, folder,
-                                       progress=progress, overwrite=False)
+            groups = conv.read_pdf(pdf_path, template_path(), progress=progress)
         except Exception as e:
             traceback.print_exc()
             return {"error": f"Couldn't read this PDF: {e}"}
         finally:
             self._busy = False
 
-        done = [r for r in results if "error" not in r]
+        people = lab.label_people(groups)
+        checklist = load_checks()
+        matches, missing = lab.match_checks(people, checklist)
+        self._pending = {"groups": groups, "folder": folder, "invoice_no": invoice_no,
+                         "people": people, "checklist": checklist}
+        if not matches:
+            return self.finish([])
+        matched = {m["name"] for m in matches}
+        return {"checks": {
+            "rows": matches,
+            "missing": [e["name"] for e in checklist if e["name"] in missing and e.get("amount")],
+            "others": [{"name": p["name"], "total": lab.dollars(p["total"])}
+                       for p in people if p["name"] not in matched],
+        }}
+
+    def cancel_pending(self):
+        self._pending = None
+        return True
+
+    def finish(self, confirmed):
+        """Write the invoices and the label sheet, using the check amounts the
+        user confirmed in the pop-up: [{name, amount, entry, remove}]."""
+        pend = self._pending
+        if not pend:
+            return {"error": "Nothing to save. Drop the PDF in again."}
+        confirmed = confirmed or []
+        folder = pend["folder"]
+        try:
+            for c in confirmed:
+                c["amount"] = round(float(c.get("amount") or 0), 2)
+            if confirmed:
+                save_checks(lab.update_checklist(pend["checklist"], pend["people"], confirmed))
+            checks = {c["name"]: c["amount"] for c in confirmed if not c.get("remove") and c["amount"]}
+            results = conv.write_invoices(pend["groups"], template_path(), pend["invoice_no"], folder,
+                                          overwrite=False)
+            done = [r for r in results if "error" not in r]
+            labels_out = None
+            if pend["people"]:
+                first = done[0]["invoice_no"] if done else pend["invoice_no"]
+                path = conv.unique_path(os.path.join(folder, f"MLL_LABELS_{first}.docx"))
+                lab.build_labels(labels_template_path(), path, pend["people"], checks)
+                labels_out = {"path": path, "filename": os.path.basename(path),
+                              "count": len(pend["people"]), "checks": len(checks)}
+        except Exception as e:
+            traceback.print_exc()
+            return {"error": f"Couldn't save: {e}"}
+        self._pending = None
+
+        s = load_settings()
         if done:
             s["last_invoice_no"] = done[-1]["invoice_no"]
         s["last_folder"] = folder
@@ -237,8 +322,8 @@ class Api:
                     total_ok=r["total_ok"], issues=r["issues"], path=r["path"],
                     filename=os.path.basename(r["path"]))
             out.append(item)
-        return {"results": out, "folder": folder,
-                "next_invoice_no": conv.next_invoice_no(s["last_invoice_no"], 1) if done else invoice_no}
+        return {"results": out, "folder": folder, "labels": labels_out,
+                "next_invoice_no": conv.next_invoice_no(s["last_invoice_no"], 1) if done else pend["invoice_no"]}
 
     # ---- Finder / Explorer / Excel ----------------------------------------
     def open_file(self, path):
