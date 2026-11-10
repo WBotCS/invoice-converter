@@ -45,7 +45,7 @@ def z(v):
 
 
 def dollars(v):
-    """Regular rounding to the dollar: 50 cents or more rounds up (750.5 -> 751, 166.31 -> 166)."""
+    """Round to the dollar the way Excel does (750.5 -> 751)."""
     return int(Decimal(str(round(z(v), 4))).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
@@ -55,13 +55,6 @@ def fmt(v, blank_if_zero=False):
     if v == 0:
         return "" if blank_if_zero else "0"
     return f"{v:.2f}".rstrip("0").rstrip(".")
-
-
-def usd(v, blank_if_zero=False):
-    """Dollar amounts on the label: whole dollars, 50 cents and up rounds up
-    (610.52 -> '611', 166.31 -> '166')."""
-    d = dollars(v)
-    return "" if (d == 0 and blank_if_zero) else str(d)
 
 
 # ------------------------------------------------------------------ people ---
@@ -196,15 +189,15 @@ def _cell(width, *paras):
 def _total_runs(p, check):
     total = dollars(p["total"])
     if check:
-        return [_run("Total Pay = ", bold=True), _run(usd(total - dollars(check)), bold=True, noproof=True),
-                _run(f" + {usd(check)}", noproof=True)]
+        return [_run("Total Pay = ", bold=True), _run(fmt(total - check), bold=True, noproof=True),
+                _run(f" + {fmt(check)}", noproof=True)]
     return [_run("Total Pay = ", bold=True), _run(str(total), bold=True, noproof=True)]
 
 
 def _last_line(p):
     if p["adj_min"] and not p["misc"]:
-        return [_run("Adj Min = "), _run(usd(p["adj_min"]), noproof=True)]
-    return [_run("Misc = "), _run(usd(p["misc"] + p["adj_min"], blank_if_zero=True), noproof=True)]
+        return [_run("Adj Min = "), _run(fmt(p["adj_min"]), noproof=True)]
+    return [_run("Misc = "), _run(fmt(p["misc"] + p["adj_min"], blank_if_zero=True), noproof=True)]
 
 
 def label_cell(p, check=0):
@@ -213,11 +206,11 @@ def label_cell(p, check=0):
                _para([], bold_mark=True, ind=True)),
          _cell(1710, _para(_total_runs(p, check)))),
         (_cell(1844, _para([_run("Reg Hrs: "), _run(fmt(p["reg_hrs"], True), noproof=True),
-                            _run(" = "), _run(usd(p["reg_pay"]), noproof=True)])),
-         _cell(1710, _para([_run("PCS Work = "), _run(usd(p["pcs"]), noproof=True)]))),
+                            _run(" = "), _run(fmt(p["reg_pay"]), noproof=True)])),
+         _cell(1710, _para([_run("PCS Work = "), _run(fmt(p["pcs"]), noproof=True)]))),
         (_cell(1844, _para([_run("OT Hrs: "), _run(fmt(p["ot_hrs"], True), noproof=True),
-                            _run(" = "), _run(usd(p["ot_pay"]), noproof=True)])),
-         _cell(1710, _para([_run("Bonus = "), _run(usd(p["bonus"], True), noproof=True)]))),
+                            _run(" = "), _run(fmt(p["ot_pay"]), noproof=True)])),
+         _cell(1710, _para([_run("Bonus = "), _run(fmt(p["bonus"], True), noproof=True)]))),
         (_cell(1844, _para([], bold_mark=True)), _cell(1710, _para(_last_line(p)))),
     ]
     none = '<w:top w:val="none" w:sz="0" w:space="0" w:color="auto"/><w:left w:val="none" w:sz="0" w:space="0" w:color="auto"/><w:bottom w:val="none" w:sz="0" w:space="0" w:color="auto"/><w:right w:val="none" w:sz="0" w:space="0" w:color="auto"/><w:insideH w:val="none" w:sz="0" w:space="0" w:color="auto"/><w:insideV w:val="none" w:sz="0" w:space="0" w:color="auto"/>'
