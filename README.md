@@ -16,7 +16,15 @@ in `checks.json` (Mac: `~/Library/Application Support/Invoice Converter`,
 Windows: `%APPDATA%\Invoice Converter`) and starts from the UW entries of the
 payroll workbook's ChecksTable.
 
+## Windows: install on the PC itself
+
+Unzip the project, open the folder and double-click
+**Install Invoice Converter (Windows).bat**. It installs Python 3.12 and Tesseract
+if needed, builds the app, and adds it to the Desktop and Start menu (about 10
+minutes the first time). Run it again to update.
+
 ## Windows: download the app
+
 
 1. On GitHub, open **Actions** → the latest green **Build Windows app** run.
 2. At the bottom, download **Invoice-Converter-Windows** and unzip it.
