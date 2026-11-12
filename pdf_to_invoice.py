@@ -523,7 +523,8 @@ def _clean_name(raw):
 
 
 def match_name(readings, names):
-    """Match one or more OCR readings of a name against the Employee List.
+    """Check one or more OCR readings of a name against names already known to
+    be right (exact matches only - a similar name is never substituted).
     Leading junk words (scan specks read as text) are ignored by also trying
     word-suffixes of each reading (at least 2 words, so 'Pech Soeun' can never
     collapse to just 'Soeun').
@@ -561,8 +562,8 @@ def match_name(readings, names):
     runner = ranked[1][1] if len(ranked) > 1 else 0.0
     if sc >= 0.999:
         return best, "exact", sc
-    if sc >= 0.84 and sc - runner >= 0.05:
-        return best, "fuzzy", sc
+    # Never swap in a merely similar name: a new employee can look like an old
+    # one. Use what the PDF says; the app asks the user to check unknown names.
     return fallback, "new", sc
 
 
@@ -942,11 +943,13 @@ def combine(pages_data):
     }
 
 
-def read_pdf(pdf, template, pages=None, progress=None):
+def read_pdf(pdf, template, pages=None, progress=None, known_names=()):
     """Step 1: OCR the PDF. Returns one entry per timesheet: {'page', 'nums',
-    'data'} or {'page', 'nums', 'error'} for a page that couldn't be read."""
+    'data'} or {'page', 'nums', 'error'} for a page that couldn't be read.
+    Names are used as the PDF has them; known_names (plus the template's
+    Employee List) only tell which readings are already known to be right."""
     with zipfile.ZipFile(template) as zf:
-        names = read_employee_list(zf)
+        names = read_employee_list(zf) + [n for n in known_names if n]
     total_pages = len(pymupdf.open(pdf))
 
     extracted = []

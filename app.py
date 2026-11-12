@@ -132,6 +132,7 @@ import labels as lab
 RES_DIR = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 SETTINGS = os.path.join(SUPPORT_DIR, "settings.json")
 CHECKS = os.path.join(SUPPORT_DIR, "checks.json")
+NAMES = os.path.join(SUPPORT_DIR, "names.json")
 
 
 def _desktop():
@@ -195,6 +196,26 @@ def save_checks(data):
         traceback.print_exc()
 
 
+def load_names():
+    """Names confirmed in earlier runs ("known") and spelling fixes the user
+    made ("fixes": name as the scan read it -> correct name)."""
+    try:
+        with open(NAMES, encoding="utf-8") as f:
+            d = json.load(f)
+        return {"known": list(d.get("known", [])), "fixes": dict(d.get("fixes", {}))}
+    except Exception:
+        return {"known": [], "fixes": {}}
+
+
+def save_names(d):
+    try:
+        os.makedirs(SUPPORT_DIR, exist_ok=True)
+        with open(NAMES, "w", encoding="utf-8") as f:
+            json.dump(d, f, indent=2, ensure_ascii=False)
+    except Exception:
+        traceback.print_exc()
+
+
 class Api:
     def __init__(self):
         self._window = None
@@ -246,22 +267,32 @@ class Api:
         try:
             def progress(p, n):
                 self._window.evaluate_js(f"window.onProgress({p}, {n})")
-            groups = conv.read_pdf(pdf_path, template_path(), progress=progress)
+            store = load_names()
+            known = lab.UW_NAMES + store["known"] + list(store["fixes"].values())
+            groups = conv.read_pdf(pdf_path, template_path(), progress=progress, known_names=known)
         except Exception as e:
             traceback.print_exc()
             return {"error": f"Couldn't read this PDF: {e}"}
         finally:
             self._busy = False
 
+        # spelling fixes made in earlier weeks
+        fixes = {lab._key(k): v for k, v in store["fixes"].items()}
+        lab.apply_renames(groups, {e["name"]: fixes[lab._key(e["name"])]
+                                   for g in groups for e in g.get("data", {}).get("employees", [])
+                                   if lab._key(e["name"]) in fixes})
+        review = lab.names_to_review(groups, known)
+
         people = lab.label_people(groups)
         checklist = load_checks()
         matches, missing = lab.match_checks(people, checklist)
         self._pending = {"groups": groups, "folder": folder, "invoice_no": invoice_no,
-                         "people": people, "checklist": checklist}
-        if not matches:
-            return self.finish([])
+                         "checklist": checklist}
+        if not matches and not review:
+            return self.finish([], [])
         matched = {m["name"] for m in matches}
         return {"checks": {
+            "names": review,
             "rows": matches,
             "missing": [e["name"] for e in checklist if e["name"] in missing and e.get("amount")],
             "others": [{"name": p["name"], "total": lab.dollars(p["total"])}
@@ -272,30 +303,53 @@ class Api:
         self._pending = None
         return True
 
-    def finish(self, confirmed):
-        """Write the invoices and the label sheet, using the check amounts the
-        user confirmed in the pop-up: [{name, amount, entry, remove}]."""
+    def finish(self, confirmed, names=None):
+        """Write the invoices and the label sheet, using what the user confirmed
+        in the pop-up: check amounts [{name, amount, entry, remove}] and names
+        [{from, to}] (to = the corrected spelling, or the same name)."""
         pend = self._pending
         if not pend:
             return {"error": "Nothing to save. Drop the PDF in again."}
         confirmed = confirmed or []
+        names = names or []
         folder = pend["folder"]
         try:
+            # names first: the invoice, the labels and the check list all use them
+            renames = {}
+            for n in names:
+                old, new = (n.get("from") or "").strip(), " ".join((n.get("to") or "").split())
+                if old and new and new != old:
+                    renames[old] = new
+            lab.apply_renames(pend["groups"], renames)
+            if names:
+                store = load_names()
+                keys = {lab._key(k) for k in store["known"]}
+                for n in names:
+                    final = renames.get(n["from"], n["from"])
+                    if lab._key(final) not in keys:
+                        store["known"].append(final)
+                        keys.add(lab._key(final))
+                for old, new in renames.items():
+                    store["fixes"][old] = new
+                save_names(store)
+            people = lab.label_people(pend["groups"])
+
             for c in confirmed:
+                c["name"] = renames.get(c["name"], c["name"])
                 c["amount"] = round(float(c.get("amount") or 0), 2)
             if confirmed:
-                save_checks(lab.update_checklist(pend["checklist"], pend["people"], confirmed))
+                save_checks(lab.update_checklist(pend["checklist"], people, confirmed))
             checks = {c["name"]: c["amount"] for c in confirmed if not c.get("remove") and c["amount"]}
             results = conv.write_invoices(pend["groups"], template_path(), pend["invoice_no"], folder,
                                           overwrite=False)
             done = [r for r in results if "error" not in r]
             labels_out = None
-            if pend["people"]:
+            if people:
                 first = done[0]["invoice_no"] if done else pend["invoice_no"]
                 path = conv.unique_path(os.path.join(folder, f"MLL_LABELS_{first}.docx"))
-                lab.build_labels(labels_template_path(), path, pend["people"], checks)
+                lab.build_labels(labels_template_path(), path, people, checks)
                 labels_out = {"path": path, "filename": os.path.basename(path),
-                              "count": len(pend["people"]), "checks": len(checks)}
+                              "count": len(people), "checks": len(checks)}
         except Exception as e:
             traceback.print_exc()
             return {"error": f"Couldn't save: {e}"}

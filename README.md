@@ -5,6 +5,14 @@ timesheet, using `template.xlsx` for the layout, plus the employee label sheet
 (`MLL_LABELS_<invoice no>.docx`, laid out like `labels_template.docx` for the
 sticker paper). Works on Mac and Windows.
 
+## Names
+
+Names come from the PDF as the scan reads them; the app never swaps in a
+different, similar-looking name. A name it hasn't seen before is listed in the
+pop-up before saving so the spelling can be fixed. Fixed and confirmed names are
+remembered in `names.json` (same folder as `checks.json`), so each person only
+needs checking once.
+
 ## Checks
 
 Some employees get part of their pay as a check. Before saving, the app shows

@@ -38,6 +38,120 @@ DEFAULT_CHECKS = [
     {"name": "Ravy Suon", "aliases": [], "amount": 0},
 ]
 
+# UW employee names from the payroll workbook's Employees sheet. Used only to
+# recognise names the scan read exactly right (never to replace a name).
+UW_NAMES = [
+    "Ana Caraballo",
+    "Bousqust Chenda P",
+    "Bunya Mansfield",
+    "Chamroeun Vuty",
+    "Chan Sothavy",
+    "Chea Kimpuoch",
+    "Chea Somaly",
+    "Chea Suor",
+    "Chen Pichara J",
+    "Chhea Vuochneang",
+    "Chhem Salina Navy",
+    "Chhom Chhovin",
+    "Chhum Dina Kim",
+    "Chhuon Pao",
+    "Chhy Touch",
+    "Chin Thirith",
+    "Chook Alisa",
+    "Do Hoang Van",
+    "Eam Aun",
+    "Ek Sok Vinney",
+    "Hem Sidin",
+    "Hiek Seang",
+    "Him Sarom",
+    "Hing Chansophea",
+    "Hing Sokunthea",
+    "Hoang Anh Tuyet",
+    "Hol Sokchanthida",
+    "Hoy Sothy",
+    "Huo Sok Kheang",
+    "Huor Samphors",
+    "Huy Keary",
+    "Kairouz Mary",
+    "Kan Hath",
+    "Keo Vichet",
+    "Keo Vikram",
+    "Khan Nhep",
+    "Kheav Savoeun",
+    "Khim Sophorn",
+    "Khum Sokhem",
+    "Kim Sokunthea S",
+    "Kim Sotha",
+    "Kim Thi Som An",
+    "Kimsrey Taing",
+    "Koul Sophorn",
+    "Kry Yenmeur",
+    "Lam KimAnh",
+    "Lay Dany",
+    "Leilanys Mercado",
+    "Lim Sodany",
+    "Liv Keav",
+    "Lors Amey",
+    "Meas Sopha",
+    "Nao Chanthida",
+    "Nget Sopho",
+    "Nguyen Thanh T",
+    "Nguyen Thao Thi",
+    "Nhem Chanthern",
+    "Nhem Kimlee",
+    "Oeng Pichsrey",
+    "Oeurng Bopha",
+    "Pen Sophal",
+    "Phan Kakada",
+    "Pheng Ratsathya",
+    "Phin Matin",
+    "Pholy Anabelle Satuka",
+    "Pol Sreymom",
+    "Pon Theany",
+    "Prum Vanny",
+    "Rath Aydalyne",
+    "Ravy Suon",
+    "Roeun Kimhuoy",
+    "Run Socheat",
+    "Sa Sokkea",
+    "San Serenity",
+    "Savun An Buth",
+    "Seng Tina",
+    "Sera Krim",
+    "Sierra Maria E",
+    "Sim Oeun",
+    "Sin Bunthoeun",
+    "Sok Lyda",
+    "Sok Rida Mom",
+    "Sok Sinat",
+    "Son Thi Nen",
+    "Sophea Hor",
+    "Sovannary Chay",
+    "Sreylen Leng",
+    "Srong Thona",
+    "Sun Sara",
+    "Sun Touch",
+    "Suos Poch",
+    "Taing Kimsrey",
+    "Taing Sokchea",
+    "Thach Um T",
+    "Than Ly",
+    "Tith Sok Heng",
+    "Toaquiza Diana",
+    "Tola Sam",
+    "Tom Chanchakry",
+    "Trinh Quyen T",
+    "Uch Srey Hour",
+    "Vath Voeun",
+    "Ven Sok",
+    "Ven Sophy",
+    "Visal Kim",
+    "Xayasinh Chintala",
+    "Yang Sokunthea",
+    "Yean Mom",
+    "Yon Chheng",
+]
+
 
 # ---------------------------------------------------------------- numbers ---
 def z(v):
@@ -162,6 +276,38 @@ def update_checklist(checklist, people, confirmed):
         if not any(_key(n) == _key(c["name"]) for n in known):
             e["aliases"].append(c["name"])  # remember how the timesheet spells it
     return [e for i, e in enumerate(out) if i not in drop]
+
+
+def apply_renames(groups, renames):
+    """Change employee names in the timesheet data (invoice and labels both
+    use it). renames: {name as read: corrected name}."""
+    if not renames:
+        return
+    for g in groups:
+        for e in g.get("data", {}).get("employees", []):
+            new = renames.get(e.get("name"))
+            if new:
+                e["name"] = new
+                e["match"] = "exact"
+
+
+def names_to_review(groups, known):
+    """Names on this timesheet that aren't already known to be right, with
+    each person's total pay so they're easy to find on the PDF."""
+    known_keys = {_key(n) for n in known}
+    seen, out = set(), []
+    for g in groups:
+        for e in g.get("data", {}).get("employees", []):
+            n = e.get("name") or ""
+            k = _key(n)
+            # "exact": the scan read a name already known to be right
+            if not n or k in seen or k in known_keys or e.get("match") == "exact":
+                continue
+            seen.add(k)
+            odd = bool(re.search(r"[^A-Za-z' .-]", n)) or any(len(w) == 1 for w in n.split()[:-1])
+            out.append({"name": n, "total": dollars(e.get("total")), "odd": odd})
+    out.sort(key=lambda r: (not r["odd"], _fold(r["name"]).lower()))
+    return out
 
 
 # --------------------------------------------------------------- the docx ---

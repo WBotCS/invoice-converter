@@ -135,6 +135,11 @@
   select { font: inherit; padding: 6px 8px; border-radius: 6px; border: 1px solid var(--line); background: var(--sheet); color: var(--ink); max-width: 100%; }
   .note { color: var(--muted); font-size: 12.5px; margin: 10px 0 0; }
   .rowerr { color: var(--err); font-size: 12px; }
+  h3.sec { font-size: 13.5px; font-weight: 600; margin: 14px 0 0; }
+  section:first-child h3.sec { margin-top: 4px; }
+  table.names input { width: 100%; text-align: left; }
+  table.names tr.odd input { border-color: var(--warn, #c98a00); }
+  .flag { color: var(--warn, #c98a00); font-size: 11.5px; display: block; margin-top: 2px; }
   .hidden { display: none !important; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -191,17 +196,28 @@
 <div class="overlay hidden" id="checks" role="dialog" aria-modal="true" aria-labelledby="checks-title">
   <div class="dialog">
     <header>
-      <h2 id="checks-title">Confirm check amounts</h2>
-      <p class="sub" style="margin-top:4px">These employees get part of their pay as a check. Their label shows the cash part in bold, then the check.</p>
+      <h2 id="checks-title">Check before saving</h2>
     </header>
     <div class="body">
-      <table class="checks">
-        <thead><tr><th>Employee</th><th class="num">Total</th><th class="num">Check</th><th>Label shows</th><th></th></tr></thead>
-        <tbody id="checks-rows"></tbody>
-      </table>
-      <div class="addrow"><select id="checks-add" aria-label="Add a check for another employee"></select></div>
-      <p class="note" id="checks-missing"></p>
-      <p class="note">Amounts you confirm are remembered for next time. Set a check to 0 to skip it this week; × takes the person off the check list.</p>
+      <section id="names-sec">
+        <h3 class="sec">Names to check</h3>
+        <p class="note" style="margin-top:2px">These names are new, so they're shown exactly as the scan read them. Fix any spelling that's off; your fixes are remembered.</p>
+        <table class="checks names">
+          <thead><tr><th>Name</th><th class="num">Total</th></tr></thead>
+          <tbody id="names-rows"></tbody>
+        </table>
+      </section>
+      <section id="checks-sec">
+        <h3 class="sec">Check amounts</h3>
+        <p class="note" style="margin-top:2px">These employees get part of their pay as a check. Their label shows the cash part in bold, then the check.</p>
+        <table class="checks" id="checks-table">
+          <thead><tr><th>Employee</th><th class="num">Total</th><th class="num">Check</th><th>Label shows</th><th></th></tr></thead>
+          <tbody id="checks-rows"></tbody>
+        </table>
+        <div class="addrow"><select id="checks-add" aria-label="Add a check for another employee"></select></div>
+        <p class="note" id="checks-missing"></p>
+        <p class="note">Amounts you confirm are remembered for next time. Set a check to 0 to skip it this week; × takes the person off the check list.</p>
+      </section>
     </div>
     <footer>
       <button class="secondary" id="checks-cancel">Cancel</button>
@@ -278,15 +294,29 @@ function finished(res) {
 /* ---- check amounts pop-up ---- */
 let checkRows = [], checkOthers = [];
 function money(n) { if (typeof n !== 'number') return String(n); return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''); }
+let nameRows = [];
 function showChecks(c) {
+  nameRows = (c.names || []).map(n => ({ ...n, to: n.name }));
+  $('names-sec').classList.toggle('hidden', !nameRows.length);
+  $('names-rows').innerHTML = nameRows.map((n, i) => `
+    <tr data-i="${i}" class="${n.odd ? 'odd' : ''}">
+      <td><input type="text" value="${esc(n.name)}" aria-label="Name (read as ${esc(n.name)})" spellcheck="false">
+        ${n.odd ? '<span class="flag">Looks like a misread: check this one</span>' : ''}</td>
+      <td class="num">${n.total.toLocaleString()}</td>
+    </tr>`).join('');
+  $('names-rows').querySelectorAll('tr').forEach(tr => {
+    const inp = tr.querySelector('input');
+    inp.addEventListener('input', () => { nameRows[+tr.dataset.i].to = inp.value; validate(); });
+  });
   checkRows = c.rows.map(r => ({ ...r, remove: false }));
   checkOthers = c.others.slice();
   $('checks-missing').textContent = c.missing.length
     ? 'On the check list but not found on this timesheet: ' + c.missing.join(', ') + '. If someone is here under a different spelling, add them below.'
     : '';
+  $('checks-table').classList.toggle('hidden', !checkRows.length);
   renderChecks();
   $('checks').classList.remove('hidden');
-  const first = $('checks-rows').querySelector('input'); if (first) first.focus();
+  const first = $('checks').querySelector('tbody input'); if (first) first.focus();
 }
 function renderChecks() {
   $('checks-rows').innerHTML = checkRows.map((r, i) => r.remove ? '' : `
@@ -324,13 +354,15 @@ function updateRow(tr, i) {
   validate();
 }
 function validate() {
-  const bad = checkRows.some(r => !r.remove && (isNaN(parseAmt(r.amount)) || parseAmt(r.amount) > r.total));
+  const bad = checkRows.some(r => !r.remove && (isNaN(parseAmt(r.amount)) || parseAmt(r.amount) > r.total))
+    || nameRows.some(n => !n.to.trim());
   $('checks-ok').disabled = bad;
 }
 $('checks-add').addEventListener('change', e => {
   if (e.target.value === '') return;
   const o = checkOthers.splice(+e.target.value, 1)[0];
   checkRows.push({ name: o.name, total: o.total, amount: '', entry: null, remove: false });
+  $('checks-table').classList.remove('hidden');
   renderChecks();
   const ins = $('checks-rows').querySelectorAll('input'); ins[ins.length - 1].focus();
 });
@@ -344,7 +376,8 @@ $('checks-ok').addEventListener('click', async () => {
   $('checks').classList.add('hidden');
   busy = true; refreshButton(); $('busy-text').textContent = 'Saving…'; $('bar').style.width = '95%';
   let res;
-  try { res = await api().finish(rows); } catch (e) { res = { error: 'Something went wrong: ' + e }; }
+  const names = nameRows.map(n => ({ from: n.name, to: n.to.trim() }));
+  try { res = await api().finish(rows, names); } catch (e) { res = { error: 'Something went wrong: ' + e }; }
   busy = false;
   finished(res);
 });
@@ -421,6 +454,7 @@ if (demo && !window.pywebview) {
     { name: 'Buth Savun An', total: 635, amount: 300, entry: 10 }, { name: 'Caraballo Ana', total: 1300, amount: 300, entry: 0 },
     { name: 'Chheng Yon', total: 866, amount: 240, entry: 12 }, { name: 'Leng Sreylen', total: 1100, amount: 450, entry: 5 },
     { name: 'Lam KimAnh', total: 800, amount: 240, entry: 2 } ], missing: ['Ravy Suon'],
+    names: [{ name: 'Phena Ratsathva(PO', total: 6200, odd: true }, { name: 'Dana Sokha', total: 625, odd: false }, { name: 'Nop Junior Rona', total: 625, odd: false }],
     others: [{ name: 'Bunya Mansfield', total: 725 }, { name: 'Chan Ly', total: 1501 }] }); }
   if (demo === 'busy') { busy = true; setSheet('busy'); window.onProgress(2, 2); refreshButton(); }
   if (demo === 'results') showResults({ folder: '/Users/wbot/Desktop', results: [
